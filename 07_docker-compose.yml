@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
+    volumes:
+      - db:/app/data
+      - ./immobilien_scraper.py:/app/immobilien_scraper.py:ro
+    environment:
+      - DB_PATH=/app/data/immobilien.db
+      - SCRAPE_REGION=wien
+      - SCRAPE_MAX_PRICE=25000000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/data/immobilien.db"]
+      interval: 3600s
+      timeout: 10s
+      retries: 3
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "5000:5000"
+    volumes:
+      - db:/app/data
+      - ./backend.py:/app/backend.py:ro
+    environment:
+      - DB_PATH=/app/data/immobilien.db
+      - FLASK_ENV=production
+    restart: unless-stopped
+    depends_on:
+      - scraper
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://api:5000
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  db:
+
+networks:
+  default:
+    name: immobilien-net
